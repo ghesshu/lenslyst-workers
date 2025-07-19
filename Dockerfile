@@ -44,5 +44,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD bun -e "const res = await fetch('http://localhost:3000/health'); process.exit(res.status === 200 ? 0 : 1)" || exit 1
 
-# Run the TypeScript app with bun
-CMD ["bun", "run", "app.ts"]
+# Run the compiled JavaScript app with bun
+CMD ["bun", "run", "start"]
