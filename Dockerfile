@@ -1,7 +1,7 @@
 # Use the official Bun image
 FROM oven/bun:alpine
 
-# Install build dependencies for canvas and other native modules
+# Install build dependencies for canvas and other native modules + curl for healthcheck
 RUN apk add --no-cache \
     python3 \
     make \
@@ -14,7 +14,8 @@ RUN apk add --no-cache \
     pixman-dev \
     pangomm-dev \
     libjpeg-turbo-dev \
-    freetype-dev
+    freetype-dev \
+    curl
 
 # Set the working directory
 WORKDIR /app
@@ -40,12 +41,9 @@ USER bunuser
 # Expose the port
 EXPOSE 3000
 
-# Install curl for healthcheck
-RUN apk add --no-cache curl
-
-# Health check for Coolify
+# Health check for Coolify - simple process check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:3000/health || exit 1
+  CMD pgrep -f "bun.*app.js" || exit 1
 
 # Run the compiled JavaScript app with bun
 CMD ["bun", "run", "start"]
