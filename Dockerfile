@@ -40,9 +40,12 @@ USER bunuser
 # Expose the port
 EXPOSE 3000
 
+# Install curl for healthcheck
+RUN apk add --no-cache curl
+
 # Health check for Coolify
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD bun -e "const res = await fetch('http://localhost:3000/health'); process.exit(res.status === 200 ? 0 : 1)" || exit 1
+  CMD curl -f http://localhost:3000/health || exit 1
 
 # Run the compiled JavaScript app with bun
 CMD ["bun", "run", "start"]

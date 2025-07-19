@@ -27,6 +27,11 @@ app.get("/", (req, res) => {
   res.send("Welcome to Lenslyst");
 });
 
+// Add this health endpoint
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "OK", timestamp: new Date().toISOString() });
+});
+
 const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
   const errorStatus = err.status || 500;
   const errorMessage = err.message || "Something went wrong";
