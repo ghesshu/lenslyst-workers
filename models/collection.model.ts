@@ -30,7 +30,29 @@ export type WatermarkProgress = {
   total: number;
   watermarked: number;
   locked: boolean;
-  status: "idle" | "processing" | "completed" | "failed";
+  status: "idle" | "queued" | "processing" | "completed" | "failed";
+  queuedAt?: Date;
+  startedAt?: Date;
+  completedAt?: Date;
+  estimatedTimeRemaining?: number; // in seconds
+  currentImageName?: string;
+};
+
+// Enhanced progress response type for API responses
+export type WatermarkProgressResponse = {
+  collectionId: string;
+  collectionName: string;
+  status: "idle" | "queued" | "processing" | "completed" | "failed";
+  totalImages: number;
+  processedImages: number;
+  queuePosition?: number;
+  queuedAt?: Date;
+  startedAt?: Date;
+  completedAt?: Date;
+  estimatedTimeRemaining?: number;
+  currentImageName?: string;
+  progressPercentage: number;
+  elapsedTime?: number; // in seconds
 };
 
 interface ICollection extends Document {
@@ -49,6 +71,8 @@ interface ICollection extends Document {
   watermarkProgress?: WatermarkProgress;
   setWatermarkConfig(config: WatermarkConfig): void;
   setWatermarkProgress(progress: WatermarkProgress): void;
+  canBeQueued(): boolean;
+  isInProgress(): boolean;
 }
 
 const collectionSchema = new Schema<ICollection>({
@@ -120,9 +144,14 @@ const collectionSchema = new Schema<ICollection>({
     locked: { type: Boolean, default: false },
     status: {
       type: String,
-      enum: ["idle", "processing", "completed", "failed"],
+      enum: ["idle", "queued", "processing", "completed", "failed"],
       default: "idle",
     },
+    queuedAt: { type: Date },
+    startedAt: { type: Date },
+    completedAt: { type: Date },
+    estimatedTimeRemaining: { type: Number },
+    currentImageName: { type: String },
   },
 });
 
@@ -140,6 +169,23 @@ collectionSchema.methods.setWatermarkProgress = function (
   progress: WatermarkProgress
 ) {
   this.watermarkProgress = progress;
+};
+
+// Method to check if collection can be queued
+collectionSchema.methods.canBeQueued = function (): boolean {
+  const status = this.watermarkProgress?.status;
+  return (
+    !status ||
+    status === "idle" ||
+    status === "completed" ||
+    status === "failed"
+  );
+};
+
+// Method to check if collection is currently in progress (queued or processing)
+collectionSchema.methods.isInProgress = function (): boolean {
+  const status = this.watermarkProgress?.status;
+  return status === "queued" || status === "processing";
 };
 
 collectionSchema.index({ slug: 1, workspaceId: 1 }, { unique: true });
