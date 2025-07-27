@@ -58,7 +58,7 @@ interface ProcessingMetrics {
 
 // Load batch processing configuration from environment variables
 const getBatchOptions = (): BatchProcessingOptions => ({
-  batchSize: parseInt(process.env.BATCH_SIZE || "10"),
+  batchSize: parseInt(process.env.BATCH_SIZE || "5"),
   maxConcurrency: parseInt(
     process.env.MAX_CONCURRENCY || String(Math.max(1, cpus().length - 1))
   ),
