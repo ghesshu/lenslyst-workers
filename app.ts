@@ -5,7 +5,7 @@ import logger from "./utils/logger";
 import { createServer } from "http";
 dotenv.config();
 
-import "./workers/watermark/watermark.worker";
+import "./workers/watermark/batch.watermark.worker";
 
 const app: Express = express();
 const httpServer = createServer(app);
