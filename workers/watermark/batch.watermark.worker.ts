@@ -365,7 +365,7 @@ const processSingleImage = async (
 
     // Generate filename and S3 key for processed image
     const originalFileName = image.key.split("/").pop() || `image-${image._id}`;
-    const processedImageKey = `watermarked-${collectionId}/${originalFileName}`;
+    const processedImageKey = `watermark/watermarked-${collectionId}/${originalFileName}`;
 
     // Upload processed image to S3
     await uploadProcessedImage(
@@ -889,3 +889,5 @@ process.on("unhandledRejection", (reason, promise) => {
 });
 
 export default startWorker;
+
+// 1000 recordper batch
