@@ -35,7 +35,14 @@ const watermarkedFileSchema = new Schema(
   { timestamps: true }
 );
 
-watermarkedFileSchema.index({ collectionId: 1, originalFileId: 1 });
+// In your WatermarkedFile model file
+watermarkedFileSchema.index(
+  {
+    collectionId: 1,
+    originalFileId: 1,
+  },
+  { unique: true }
+);
 
 export const WatermarkedFile = mongoose.model(
   "WatermarkedFile",

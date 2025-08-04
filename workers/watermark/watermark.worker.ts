@@ -87,6 +87,9 @@ const deleteWatermarkedDirectory = async (
 
     // Delete watermarked files from database
     await WatermarkedFile.deleteMany({ collectionId });
+    logger.info(
+      `Deleted watermarked files from database for collection: ${collectionId}`
+    );
 
     // List all objects in the directory
     const listCommand = new ListObjectsV2Command({
@@ -108,6 +111,13 @@ const deleteWatermarkedDirectory = async (
           logger.info(`Deleted: ${object.Key}`);
         }
       }
+      logger.info(
+        `Deleted ${listResponse.Contents.length} files from S3 for collection: ${collectionId}`
+      );
+    } else {
+      logger.info(
+        `No existing watermarked files found in S3 for collection: ${collectionId}`
+      );
     }
 
     logger.info(`Deleted watermarked directory: ${prefix}`);
@@ -267,10 +277,20 @@ const processWatermarkJob = async (jobData: WatermarkJobData) => {
 
     // Check if there's existing watermarked content and delete it
     const collection = await Collection.findById(collectionId);
-    if (collection?.watermarkProgress?.status === "completed") {
+    if (
+      collection?.watermarkProgress?.status === "completed" ||
+      collection?.watermarkProgress?.status === "failed" ||
+      collection?.watermarkProgress?.status === "idle"
+    ) {
       logger.info("Deleting existing watermarked directory...");
       await deleteWatermarkedDirectory(collectionId);
     }
+
+    // Always delete existing watermarked content before starting new processing
+    logger.info(
+      "Deleting existing watermarked directory and database entries..."
+    );
+    await deleteWatermarkedDirectory(collectionId);
 
     // Mark as processing and set initial progress
     hasStartedProcessing = true;
@@ -335,16 +355,30 @@ const processWatermarkJob = async (jobData: WatermarkJobData) => {
         // Upload processed image to S3
         await uploadProcessedImage(processedBuffer, processedImageKey);
 
-        // Create watermarked file entry
-        await WatermarkedFile.create({
-          name: originalFileName,
-          key: processedImageKey,
-          type: image.type,
-          size: processedBuffer.length,
-          collectionId,
-          originalFileId: image._id,
-          workspaceId: image.workspaceId,
-        });
+        // Create or update watermarked file entry (FIXED: Using findOneAndUpdate to prevent duplicates)
+        const watermarkedFile = await WatermarkedFile.findOneAndUpdate(
+          {
+            collectionId,
+            originalFileId: image._id,
+          },
+          {
+            name: originalFileName,
+            key: processedImageKey,
+            type: image.type,
+            size: processedBuffer.length,
+            workspaceId: image.workspaceId,
+          },
+          {
+            upsert: true, // Create if doesn't exist, update if exists
+            new: true, // Return the updated document
+          }
+        );
+
+        logger.info(
+          `✅ Processed and saved watermarked file: ${originalFileName} (${
+            watermarkedFile.isNew ? "created" : "updated"
+          })`
+        );
 
         // Update progress with estimated time
         await updateWatermarkProgress(collectionId, {

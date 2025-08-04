@@ -374,16 +374,24 @@ const processSingleImage = async (
       image.type || "image/jpeg"
     );
 
-    // Save watermarked file record to database
-    await WatermarkedFile.create({
-      name: originalFileName,
-      key: processedImageKey,
-      type: image.type,
-      size: processedBuffer.length,
-      collectionId,
-      originalFileId: image._id,
-      workspaceId: image.workspaceId,
-    });
+    // Save watermarked file record to database (FIXED: Using findOneAndUpdate to prevent duplicates)
+    await WatermarkedFile.findOneAndUpdate(
+      {
+        collectionId,
+        originalFileId: image._id,
+      },
+      {
+        name: originalFileName,
+        key: processedImageKey,
+        type: image.type,
+        size: processedBuffer.length,
+        workspaceId: image.workspaceId,
+      },
+      {
+        upsert: true, // Create if doesn't exist, update if exists
+        new: true, // Return the updated document
+      }
+    );
 
     const processingTime = Date.now() - startTime;
     logger.debug(`Processed image ${image.key} in ${processingTime}ms`);
@@ -508,7 +516,22 @@ const processBatch = async (
  * @param jobData - Job data from the queue
  * @returns Processing result summary
  */
-const processWatermarkJob = async (jobData: WatermarkJobData) => {
+interface WatermarkJobResult {
+  success: boolean;
+  collectionId: string;
+  reason?: string;
+  skipped?: boolean;
+  processedImages?: number;
+  failedImages?: number;
+  totalSize?: number;
+  processingTime?: number;
+  processedAt?: string;
+  message?: string;
+}
+
+const processWatermarkJob = async (
+  jobData: WatermarkJobData
+): Promise<WatermarkJobResult> => {
   let hasStartedProcessing = false;
   const options = getBatchOptions();
 
@@ -562,7 +585,10 @@ const processWatermarkJob = async (jobData: WatermarkJobData) => {
     // Clean up existing watermarked content if re-processing
     const collection = await Collection.findById(collectionId);
     if (collection?.watermarkProgress?.status === "completed") {
-      logger.info("Deleting existing watermarked directory...");
+      // Always delete existing watermarked content before starting new processing
+      logger.info(
+        "Deleting existing watermarked directory and database entries..."
+      );
       await deleteWatermarkedDirectory(collectionId);
     }
 
@@ -721,7 +747,17 @@ const processWatermarkJob = async (jobData: WatermarkJobData) => {
       }
     }
 
-    throw error;
+    // Return error result instead of throwing
+    return {
+      success: false,
+      collectionId: jobData.collectionId,
+      reason: `Processing failed: ${(error as Error).message}`,
+      skipped: false,
+      processedImages: metrics.processedCount,
+      failedImages: metrics.failedCount,
+      totalSize: metrics.totalSize,
+      processingTime: Date.now() - metrics.startTime,
+    };
   }
 };
 

@@ -40,6 +40,7 @@ RUN npm run build
 # Remove dev dependencies and source files to reduce image size
 RUN npm prune --production && \
     rm -rf src/ tsconfig.json node_modules/.cache
+
 # Create logs directory
 RUN mkdir -p logs
 

@@ -73,6 +73,9 @@ interface ICollection extends Document {
   setWatermarkProgress(progress: WatermarkProgress): void;
   canBeQueued(): boolean;
   isInProgress(): boolean;
+  isWatermarkProgressLocked(): boolean;
+  lockWatermarkProgress(): void;
+  unlockWatermarkProgress(): void;
 }
 
 const collectionSchema = new Schema<ICollection>({
@@ -186,6 +189,39 @@ collectionSchema.methods.canBeQueued = function (): boolean {
 collectionSchema.methods.isInProgress = function (): boolean {
   const status = this.watermarkProgress?.status;
   return status === "queued" || status === "processing";
+};
+
+// Method to check if watermark progress is locked
+collectionSchema.methods.isWatermarkProgressLocked = function (): boolean {
+  return this.watermarkProgress?.locked || false;
+};
+
+// Method to lock watermark progress for this collection
+collectionSchema.methods.lockWatermarkProgress = function (): void {
+  if (!this.watermarkProgress) {
+    this.watermarkProgress = {
+      total: 0,
+      watermarked: 0,
+      locked: true,
+      status: "idle",
+    };
+  } else {
+    this.watermarkProgress.locked = true;
+  }
+};
+
+// Method to unlock watermark progress for this collection
+collectionSchema.methods.unlockWatermarkProgress = function (): void {
+  if (!this.watermarkProgress) {
+    this.watermarkProgress = {
+      total: 0,
+      watermarked: 0,
+      locked: false,
+      status: "idle",
+    };
+  } else {
+    this.watermarkProgress.locked = false;
+  }
 };
 
 collectionSchema.index({ slug: 1, workspaceId: 1 }, { unique: true });
