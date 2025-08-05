@@ -348,9 +348,12 @@ const processWatermarkJob = async (jobData: WatermarkJobData) => {
           watermarkImageBuffer,
         });
 
-        // Generate processed image key
+        // Generate processed image key with unique identifier
         const originalFileName = image.key.split("/").pop() || `image-${i}`;
-        const processedImageKey = `watermarked-${collectionId}/${originalFileName}`;
+        const uniqueId = `${Date.now()}-${Math.random()
+          .toString(36)
+          .substring(2, 15)}`;
+        const processedImageKey = `watermarked-${collectionId}/${uniqueId}-${originalFileName}`;
 
         // Upload processed image to S3
         await uploadProcessedImage(processedBuffer, processedImageKey);
