@@ -16,6 +16,7 @@ import { s3Client } from "./s3";
 import { File } from "../../models/file.model";
 import logger from "../../utils/logger";
 import { cpus } from "os";
+import { createHash } from "crypto";
 
 logger.info("🚀 Watermark worker started with batch processing!");
 
@@ -166,7 +167,7 @@ const deleteWatermarkedDirectory = async (
   collectionId: string
 ): Promise<void> => {
   try {
-    const prefix = `watermarked-${collectionId}/`;
+    const prefix = `watermark/watermarked-${collectionId}/`;
 
     // Delete from database first
     await WatermarkedFile.deleteMany({ collectionId });
@@ -363,9 +364,16 @@ const processSingleImage = async (
       watermarkImageBuffer,
     });
 
-    // Generate filename and S3 key for processed image
+    // Generate filename and S3 key for processed image with timestamp for cache busting
     const originalFileName = image.key.split("/").pop() || `image-${image._id}`;
-    const processedImageKey = `watermark/watermarked-${collectionId}/${originalFileName}`;
+    // const timestamp = Date.now();
+    // const processedImageKey = `watermark/watermarked-${collectionId}/${originalFileName}?v=${timestamp}`;
+
+    const configHash = createHash("md5")
+      .update(JSON.stringify(watermarkConfig))
+      .digest("hex")
+      .substring(0, 8);
+    const processedImageKey = `watermark/watermarked-${collectionId}/${configHash}-${originalFileName}`;
 
     // Upload processed image to S3
     await uploadProcessedImage(
