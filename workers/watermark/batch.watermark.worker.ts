@@ -169,12 +169,18 @@ const deleteWatermarkedDirectory = async (
   try {
     const prefix = `watermark/watermarked-${collectionId}/`;
 
-    // Delete from database first
-    await WatermarkedFile.deleteMany({ collectionId });
+    logger.info(
+      `Starting cleanup for collection ${collectionId} with prefix: ${prefix}`
+    );
 
-    // List and delete S3 objects in batches to avoid overwhelming the API
+    // STEP 1: Always delete from database first (regardless of existence)
+    const deletedDbRecords = await WatermarkedFile.deleteMany({ collectionId });
+    logger.info(`Deleted ${deletedDbRecords.deletedCount} database records`);
+
+    // STEP 2: List and delete ALL S3 objects with the prefix
     let continuationToken: string | undefined;
-    const deletePromises: Promise<any>[] = [];
+    let totalDeleted = 0;
+    const batchSize = 100; // Process deletions in smaller batches for better performance
 
     do {
       const listCommand = new ListObjectsV2Command({
@@ -188,39 +194,95 @@ const deleteWatermarkedDirectory = async (
       continuationToken = listResponse.NextContinuationToken;
 
       if (listResponse.Contents && listResponse.Contents.length > 0) {
-        // Create delete operations for each object
-        const deleteOperations = listResponse.Contents.filter(
-          (obj) => obj.Key
-        ).map((obj) => {
-          const deleteCommand = new DeleteObjectCommand({
-            Bucket: process.env.AWS_BUCKET_NAME!,
-            Key: obj.Key!,
+        logger.info(
+          `Found ${listResponse.Contents.length} S3 objects to delete`
+        );
+
+        // Split objects into smaller batches for deletion
+        const objectsToDelete = listResponse.Contents.filter((obj) => obj.Key);
+        const batches = createChunks(objectsToDelete, batchSize);
+
+        for (const batch of batches) {
+          const deletePromises = batch.map((obj) => {
+            const deleteCommand = new DeleteObjectCommand({
+              Bucket: process.env.AWS_BUCKET_NAME!,
+              Key: obj.Key!,
+            });
+            return s3Client.send(deleteCommand).catch((error) => {
+              logger.warn(`Failed to delete S3 object ${obj.Key}:`, error);
+              return null; // Continue with other deletions even if one fails
+            });
           });
-          return s3Client.send(deleteCommand);
-        });
 
-        deletePromises.push(...deleteOperations);
+          const results = await Promise.allSettled(deletePromises);
+          const successful = results.filter(
+            (result) => result.status === "fulfilled"
+          ).length;
+          totalDeleted += successful;
 
-        // Process deletions in batches of 100 to avoid rate limits
-        if (deletePromises.length >= 100) {
-          await Promise.all(deletePromises);
-          deletePromises.length = 0; // Clear array
+          logger.debug(`Deleted batch: ${successful}/${batch.length} objects`);
+
+          // Small delay between batches to avoid overwhelming S3
+          if (batches.length > 1) {
+            await delay(100);
+          }
         }
       }
     } while (continuationToken);
 
-    // Process any remaining deletions
-    if (deletePromises.length > 0) {
-      await Promise.all(deletePromises);
-    }
-
-    logger.info(`Deleted watermarked directory: ${prefix}`);
+    logger.info(
+      `Successfully deleted watermarked directory: ${prefix} (${totalDeleted} S3 objects, ${deletedDbRecords.deletedCount} DB records)`
+    );
   } catch (error) {
     logger.error(
       `Error deleting watermarked directory for collection ${collectionId}:`,
       error
     );
-    throw error;
+    // Don't throw here - log the error but continue processing
+    // This ensures that even if cleanup fails, new watermarks can still be generated
+  }
+};
+
+/**
+ * Enhanced function to ensure complete cleanup before processing
+ * This addresses the issue of accumulating old watermarks
+ * @param collectionId - Collection ID
+ */
+const ensureCleanWatermarkDirectory = async (
+  collectionId: string
+): Promise<void> => {
+  try {
+    logger.info(
+      `Ensuring clean watermark directory for collection: ${collectionId}`
+    );
+
+    // Always perform cleanup - don't rely on database record existence
+    await deleteWatermarkedDirectory(collectionId);
+
+    // Verify cleanup was successful by checking if any files still exist
+    const prefix = `watermark/watermarked-${collectionId}/`;
+    const listCommand = new ListObjectsV2Command({
+      Bucket: process.env.AWS_BUCKET_NAME!,
+      Prefix: prefix,
+      MaxKeys: 1, // Just check if any files exist
+    });
+
+    const listResponse = await s3Client.send(listCommand);
+
+    if (listResponse.Contents && listResponse.Contents.length > 0) {
+      logger.warn(
+        `Warning: ${listResponse.Contents.length} files still exist after cleanup attempt`
+      );
+      // Could implement additional cleanup logic here if needed
+    } else {
+      logger.info(`Cleanup verification successful - no files remaining`);
+    }
+  } catch (error) {
+    logger.error(
+      `Error in ensureCleanWatermarkDirectory for collection ${collectionId}:`,
+      error
+    );
+    // Continue processing even if cleanup verification fails
   }
 };
 
@@ -590,15 +652,10 @@ const processWatermarkJob = async (
       };
     }
 
-    // Clean up existing watermarked content if re-processing
-    const collection = await Collection.findById(collectionId);
-    if (collection?.watermarkProgress?.status === "completed") {
-      // Always delete existing watermarked content before starting new processing
-      logger.info(
-        "Deleting existing watermarked directory and database entries..."
-      );
-      await deleteWatermarkedDirectory(collectionId);
-    }
+    // IMPROVED: Always clean up existing watermarked content before processing
+    // This ensures no accumulation of old watermarks regardless of database state
+    logger.info("Cleaning up any existing watermarked content...");
+    await ensureCleanWatermarkDirectory(collectionId);
 
     // Initialize processing state
     hasStartedProcessing = true;
