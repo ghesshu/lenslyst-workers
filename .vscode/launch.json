@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "bun",
+      "request": "launch",
+      "name": "Debug App",
+      "program": "${workspaceFolder}/app.ts",
+      "cwd": "${workspaceFolder}",
+      "internalConsoleOptions": "neverOpen",
+      "stopOnEntry": false,
+      "watchMode": false
+    },
+    {
+      "type": "bun",
+      "request": "launch",
+      "name": "Run App",
+      "program": "${workspaceFolder}/app.ts",
+      "cwd": "${workspaceFolder}",
+      "internalConsoleOptions": "neverOpen",
+      "noDebug": true,
+      "watchMode": false
+    },
+    {
+      "type": "bun",
+      "request": "attach",
+      "name": "Attach Bun",
+      "url": "ws://localhost:6499/",
+      "internalConsoleOptions": "neverOpen",
+      "stopOnEntry": false
+    }
+  ]
+}

@@ -18,12 +18,6 @@ import logger from "../../utils/logger";
 import { cpus } from "os";
 import { createHash } from "crypto";
 
-logger.info("🚀 Watermark worker started with batch processing!");
-
-// ===========================
-// Type Definitions
-// ===========================
-
 interface WatermarkJobData {
   collectionId: string;
   slug: string;
@@ -53,11 +47,6 @@ interface ProcessingMetrics {
   totalSize: number;
 }
 
-// ===========================
-// Configuration
-// ===========================
-
-// Load batch processing configuration from environment variables
 const getBatchOptions = (): BatchProcessingOptions => ({
   batchSize: parseInt(process.env.BATCH_SIZE || "5"),
   maxConcurrency: parseInt(
@@ -67,16 +56,6 @@ const getBatchOptions = (): BatchProcessingOptions => ({
   retryDelay: parseInt(process.env.RETRY_DELAY || "1000"),
 });
 
-// ===========================
-// Utility Functions
-// ===========================
-
-/**
- * Creates chunks of items for batch processing
- * @param items - Array of items to chunk
- * @param chunkSize - Size of each chunk
- * @returns Array of chunks
- */
 const createChunks = <T>(items: T[], chunkSize: number): T[][] => {
   const chunks: T[][] = [];
   for (let i = 0; i < items.length; i += chunkSize) {
@@ -85,22 +64,9 @@ const createChunks = <T>(items: T[], chunkSize: number): T[][] => {
   return chunks;
 };
 
-/**
- * Delays execution for specified milliseconds
- * @param ms - Milliseconds to delay
- */
 const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-// ===========================
-// S3 Operations
-// ===========================
-
-/**
- * Downloads an image from S3
- * @param key - S3 object key
- * @returns Image buffer
- */
 const getImageFromS3 = async (key: string): Promise<Buffer> => {
   try {
     const command = new GetObjectCommand({
@@ -114,7 +80,6 @@ const getImageFromS3 = async (key: string): Promise<Buffer> => {
       throw new Error("No file content received from S3");
     }
 
-    // Convert stream to buffer efficiently
     const chunks: Uint8Array[] = [];
     const reader = response.Body.transformToWebStream().getReader();
 
@@ -131,12 +96,6 @@ const getImageFromS3 = async (key: string): Promise<Buffer> => {
   }
 };
 
-/**
- * Uploads processed image to S3 with optimizations
- * @param buffer - Image buffer to upload
- * @param key - S3 object key
- * @param contentType - MIME type of the image
- */
 const uploadProcessedImage = async (
   buffer: Buffer,
   key: string,
@@ -148,7 +107,7 @@ const uploadProcessedImage = async (
       Key: key,
       Body: buffer,
       ContentType: contentType,
-      CacheControl: "max-age=31536000", // Cache for 1 year
+      CacheControl: "max-age=31536000",
     });
 
     await s3Client.send(command);
@@ -159,34 +118,24 @@ const uploadProcessedImage = async (
   }
 };
 
-/**
- * Deletes all watermarked files for a collection from S3 and database
- * @param collectionId - Collection ID to clean up
- */
 const deleteWatermarkedDirectory = async (
   collectionId: string
 ): Promise<void> => {
   try {
     const prefix = `watermark/watermarked-${collectionId}/`;
 
-    logger.info(
-      `Starting cleanup for collection ${collectionId} with prefix: ${prefix}`
-    );
-
-    // STEP 1: Always delete from database first (regardless of existence)
     const deletedDbRecords = await WatermarkedFile.deleteMany({ collectionId });
     logger.info(`Deleted ${deletedDbRecords.deletedCount} database records`);
 
-    // STEP 2: List and delete ALL S3 objects with the prefix
     let continuationToken: string | undefined;
     let totalDeleted = 0;
-    const batchSize = 100; // Process deletions in smaller batches for better performance
+    const batchSize = 100;
 
     do {
       const listCommand = new ListObjectsV2Command({
         Bucket: process.env.AWS_BUCKET_NAME!,
         Prefix: prefix,
-        MaxKeys: 1000, // S3 max keys per request
+        MaxKeys: 1000,
         ContinuationToken: continuationToken,
       });
 
@@ -198,7 +147,6 @@ const deleteWatermarkedDirectory = async (
           `Found ${listResponse.Contents.length} S3 objects to delete`
         );
 
-        // Split objects into smaller batches for deletion
         const objectsToDelete = listResponse.Contents.filter((obj) => obj.Key);
         const batches = createChunks(objectsToDelete, batchSize);
 
@@ -210,7 +158,7 @@ const deleteWatermarkedDirectory = async (
             });
             return s3Client.send(deleteCommand).catch((error) => {
               logger.warn(`Failed to delete S3 object ${obj.Key}:`, error);
-              return null; // Continue with other deletions even if one fails
+              return null;
             });
           });
 
@@ -222,7 +170,6 @@ const deleteWatermarkedDirectory = async (
 
           logger.debug(`Deleted batch: ${successful}/${batch.length} objects`);
 
-          // Small delay between batches to avoid overwhelming S3
           if (batches.length > 1) {
             await delay(100);
           }
@@ -238,16 +185,9 @@ const deleteWatermarkedDirectory = async (
       `Error deleting watermarked directory for collection ${collectionId}:`,
       error
     );
-    // Don't throw here - log the error but continue processing
-    // This ensures that even if cleanup fails, new watermarks can still be generated
   }
 };
 
-/**
- * Enhanced function to ensure complete cleanup before processing
- * This addresses the issue of accumulating old watermarks
- * @param collectionId - Collection ID
- */
 const ensureCleanWatermarkDirectory = async (
   collectionId: string
 ): Promise<void> => {
@@ -256,15 +196,13 @@ const ensureCleanWatermarkDirectory = async (
       `Ensuring clean watermark directory for collection: ${collectionId}`
     );
 
-    // Always perform cleanup - don't rely on database record existence
     await deleteWatermarkedDirectory(collectionId);
 
-    // Verify cleanup was successful by checking if any files still exist
     const prefix = `watermark/watermarked-${collectionId}/`;
     const listCommand = new ListObjectsV2Command({
       Bucket: process.env.AWS_BUCKET_NAME!,
       Prefix: prefix,
-      MaxKeys: 1, // Just check if any files exist
+      MaxKeys: 1,
     });
 
     const listResponse = await s3Client.send(listCommand);
@@ -273,7 +211,6 @@ const ensureCleanWatermarkDirectory = async (
       logger.warn(
         `Warning: ${listResponse.Contents.length} files still exist after cleanup attempt`
       );
-      // Could implement additional cleanup logic here if needed
     } else {
       logger.info(`Cleanup verification successful - no files remaining`);
     }
@@ -282,20 +219,9 @@ const ensureCleanWatermarkDirectory = async (
       `Error in ensureCleanWatermarkDirectory for collection ${collectionId}:`,
       error
     );
-    // Continue processing even if cleanup verification fails
   }
 };
 
-// ===========================
-// Database Operations
-// ===========================
-
-/**
- * Updates the watermark progress in the database
- * @param collectionId - Collection ID
- * @param progress - Progress updates to apply
- * @param options - Additional options
- */
 const updateWatermarkProgress = async (
   collectionId: string,
   progress: Partial<WatermarkProgress>,
@@ -314,7 +240,6 @@ const updateWatermarkProgress = async (
       status: "idle" as const,
     };
 
-    // Calculate estimated time remaining based on average processing speed
     let estimatedTimeRemaining: number | undefined;
     if (
       !options.skipEstimation &&
@@ -332,7 +257,6 @@ const updateWatermarkProgress = async (
       );
     }
 
-    // Merge current progress with updates
     const updatedProgress = {
       ...currentProgress,
       ...progress,
@@ -356,34 +280,36 @@ const updateWatermarkProgress = async (
   }
 };
 
-/**
- * Validates if a collection is still valid for processing
- * @param collectionId - Collection ID to validate
- * @returns True if collection can be processed
- */
 const validateCollectionForProcessing = async (
   collectionId: string
 ): Promise<boolean> => {
   try {
     const collection = await Collection.findById(collectionId);
+
+    // Handle missing collection
     if (!collection) {
       logger.warn(
         `Collection ${collectionId} no longer exists, skipping processing`
       );
+
+      try {
+        await fetch(`${process.env.CANCEL_WATERMARK_URL}/${collectionId}`);
+      } catch (cancelError) {
+        logger.error(
+          `Failed to cancel watermark for ${collectionId}:`,
+          cancelError
+        );
+      }
+
       return false;
     }
 
-    // Check if processing was cancelled or already completed
-    const progress = collection.watermarkProgress;
-    if (
-      !progress ||
-      progress.status === "idle" ||
-      progress.status === "completed"
-    ) {
+    const status = collection.watermarkProgress?.status ?? "idle";
+
+    // Skip if status is not active
+    if (["idle", "completed"].includes(status)) {
       logger.warn(
-        `Collection ${collectionId} status changed to ${
-          progress?.status || "idle"
-        }, skipping processing`
+        `Collection ${collectionId} status changed to ${status}, skipping processing`
       );
       return false;
     }
@@ -395,18 +321,6 @@ const validateCollectionForProcessing = async (
   }
 };
 
-// ===========================
-// Image Processing Functions
-// ===========================
-
-/**
- * Processes a single image with watermark
- * @param image - Image document from database
- * @param collectionId - Collection ID
- * @param watermarkConfig - Watermark configuration
- * @param watermarkImageBuffer - Optional watermark image buffer
- * @returns Processing result
- */
 const processSingleImage = async (
   image: any,
   collectionId: string,
@@ -416,35 +330,27 @@ const processSingleImage = async (
   const startTime = Date.now();
 
   try {
-    // Download original image from S3
     const imageBuffer = await getImageFromS3(image.key);
 
-    // Apply watermark to image
     const processedBuffer = await processImageWithWatermark({
       inputBuffer: imageBuffer,
       watermarkConfig,
       watermarkImageBuffer,
     });
 
-    // Generate filename and S3 key for processed image with timestamp for cache busting
     const originalFileName = image.key.split("/").pop() || `image-${image._id}`;
-    // const timestamp = Date.now();
-    // const processedImageKey = `watermark/watermarked-${collectionId}/${originalFileName}?v=${timestamp}`;
-
     const configHash = createHash("md5")
       .update(JSON.stringify(watermarkConfig))
       .digest("hex")
       .substring(0, 8);
     const processedImageKey = `watermark/watermarked-${collectionId}/${configHash}-${originalFileName}`;
 
-    // Upload processed image to S3
     await uploadProcessedImage(
       processedBuffer,
       processedImageKey,
       image.type || "image/jpeg"
     );
 
-    // Save watermarked file record to database (FIXED: Using findOneAndUpdate to prevent duplicates)
     await WatermarkedFile.findOneAndUpdate(
       {
         collectionId,
@@ -458,8 +364,8 @@ const processSingleImage = async (
         workspaceId: image.workspaceId,
       },
       {
-        upsert: true, // Create if doesn't exist, update if exists
-        new: true, // Return the updated document
+        upsert: true,
+        new: true,
       }
     );
 
@@ -484,15 +390,6 @@ const processSingleImage = async (
   }
 };
 
-/**
- * Processes a single image with retry logic
- * @param image - Image to process
- * @param collectionId - Collection ID
- * @param watermarkConfig - Watermark configuration
- * @param watermarkImageBuffer - Optional watermark image buffer
- * @param options - Retry options
- * @returns Processing result
- */
 const processImageWithRetry = async (
   image: any,
   collectionId: string,
@@ -502,7 +399,6 @@ const processImageWithRetry = async (
 ): Promise<ImageProcessingResult> => {
   let lastError: Error | undefined;
 
-  // Attempt processing with exponential backoff on failure
   for (let attempt = 0; attempt < options.retryAttempts; attempt++) {
     try {
       return await processSingleImage(
@@ -520,16 +416,13 @@ const processImageWithRetry = async (
         error
       );
 
-      // Don't delay after the last attempt
       if (attempt < options.retryAttempts - 1) {
-        // Exponential backoff: delay * 2^attempt
         const backoffDelay = options.retryDelay * Math.pow(2, attempt);
         await delay(backoffDelay);
       }
     }
   }
 
-  // All attempts failed
   return {
     success: false,
     fileId: image._id,
@@ -538,15 +431,6 @@ const processImageWithRetry = async (
   };
 };
 
-/**
- * Processes a batch of images in parallel
- * @param images - Array of images to process
- * @param collectionId - Collection ID
- * @param watermarkConfig - Watermark configuration
- * @param watermarkImageBuffer - Optional watermark image buffer
- * @param options - Batch processing options
- * @returns Array of processing results
- */
 const processBatch = async (
   images: any[],
   collectionId: string,
@@ -554,11 +438,9 @@ const processBatch = async (
   watermarkImageBuffer: Buffer | undefined,
   options: BatchProcessingOptions
 ): Promise<ImageProcessingResult[]> => {
-  // Split images into chunks for controlled concurrency
   const chunks = createChunks(images, options.maxConcurrency);
   const results: ImageProcessingResult[] = [];
 
-  // Process each chunk sequentially, but images within chunk in parallel
   for (const chunk of chunks) {
     const chunkResults = await Promise.all(
       chunk.map((image) =>
@@ -577,15 +459,6 @@ const processBatch = async (
   return results;
 };
 
-// ===========================
-// Main Job Processing
-// ===========================
-
-/**
- * Processes a complete watermark job for a collection
- * @param jobData - Job data from the queue
- * @returns Processing result summary
- */
 interface WatermarkJobResult {
   success: boolean;
   collectionId: string;
@@ -605,7 +478,6 @@ const processWatermarkJob = async (
   let hasStartedProcessing = false;
   const options = getBatchOptions();
 
-  // Initialize metrics for tracking performance
   const metrics: ProcessingMetrics = {
     startTime: Date.now(),
     processedCount: 0,
@@ -621,7 +493,6 @@ const processWatermarkJob = async (
 
     const { collectionId, watermarkConfig, slug } = jobData;
 
-    // Validate collection is still valid for processing
     if (!(await validateCollectionForProcessing(collectionId))) {
       return {
         success: false,
@@ -631,11 +502,9 @@ const processWatermarkJob = async (
       };
     }
 
-    // Fetch all images for this collection
     const images = await File.find({ collectionSlug: slug }).lean();
     logger.info(`Found ${images.length} images to process`);
 
-    // Handle empty collection
     if (images.length === 0) {
       await updateWatermarkProgress(collectionId, {
         status: "completed",
@@ -652,12 +521,9 @@ const processWatermarkJob = async (
       };
     }
 
-    // IMPROVED: Always clean up existing watermarked content before processing
-    // This ensures no accumulation of old watermarks regardless of database state
     logger.info("Cleaning up any existing watermarked content...");
     await ensureCleanWatermarkDirectory(collectionId);
 
-    // Initialize processing state
     hasStartedProcessing = true;
     await updateWatermarkProgress(collectionId, {
       total: images.length,
@@ -670,20 +536,17 @@ const processWatermarkJob = async (
       currentImageName: `Processing ${images.length} images in batches...`,
     });
 
-    // Download watermark image once if needed
     let watermarkImageBuffer: Buffer | undefined;
     if (watermarkConfig.type === "image" && watermarkConfig.imageKey) {
       logger.info("Downloading watermark image from S3...");
       watermarkImageBuffer = await getImageFromS3(watermarkConfig.imageKey);
     }
 
-    // Calculate batch information
     const totalBatches = Math.ceil(images.length / options.batchSize);
     logger.info(
       `Processing ${images.length} images in ${totalBatches} batches`
     );
 
-    // Process images in batches
     for (let i = 0; i < images.length; i += options.batchSize) {
       const batchNumber = Math.floor(i / options.batchSize) + 1;
       const batch = images.slice(i, i + options.batchSize);
@@ -692,7 +555,6 @@ const processWatermarkJob = async (
         `Processing batch ${batchNumber}/${totalBatches} (${batch.length} images)`
       );
 
-      // Check if processing should continue
       if (!(await validateCollectionForProcessing(collectionId))) {
         logger.warn(
           `Collection ${collectionId} no longer valid, stopping at batch ${batchNumber}`
@@ -700,13 +562,11 @@ const processWatermarkJob = async (
         break;
       }
 
-      // Update progress for current batch
       await updateWatermarkProgress(collectionId, {
         currentImageName: `Processing batch ${batchNumber}/${totalBatches}`,
         watermarked: metrics.processedCount,
       });
 
-      // Process current batch
       const batchResults = await processBatch(
         batch,
         collectionId,
@@ -715,7 +575,6 @@ const processWatermarkJob = async (
         options
       );
 
-      // Update metrics based on batch results
       batchResults.forEach((result) => {
         if (result.success) {
           metrics.processedCount++;
@@ -725,14 +584,12 @@ const processWatermarkJob = async (
         }
       });
 
-      // Update progress after batch completion
       const successfulInBatch = batchResults.filter((r) => r.success).length;
       await updateWatermarkProgress(collectionId, {
         watermarked: metrics.processedCount,
         currentImageName: `Completed batch ${batchNumber}/${totalBatches} (${successfulInBatch}/${batch.length} successful)`,
       });
 
-      // Log any failures in the batch
       const failedInBatch = batchResults.filter((r) => !r.success);
       if (failedInBatch.length > 0) {
         logger.warn(
@@ -745,12 +602,10 @@ const processWatermarkJob = async (
       }
     }
 
-    // Calculate final performance metrics
     const totalTime = Date.now() - metrics.startTime;
     const averageTimePerImage = totalTime / images.length;
     const averageSizePerImage = metrics.totalSize / metrics.processedCount || 0;
 
-    // Determine final status based on results
     const finalStatus =
       metrics.failedCount === 0
         ? "completed"
@@ -758,7 +613,6 @@ const processWatermarkJob = async (
         ? "failed"
         : "completed_with_errors";
 
-    // Update final progress
     await updateWatermarkProgress(collectionId, {
       status: finalStatus as any,
       locked: false,
@@ -768,7 +622,6 @@ const processWatermarkJob = async (
       watermarked: metrics.processedCount,
     });
 
-    // Log completion summary
     logger.info(
       `✅ Watermark processing completed for collection: ${collectionId}`,
       {
@@ -798,7 +651,6 @@ const processWatermarkJob = async (
   } catch (error) {
     logger.error("Error processing watermark job:", error);
 
-    // Update progress to failed status only if processing started
     if (hasStartedProcessing) {
       try {
         await updateWatermarkProgress(jobData.collectionId, {
@@ -812,7 +664,6 @@ const processWatermarkJob = async (
       }
     }
 
-    // Return error result instead of throwing
     return {
       success: false,
       collectionId: jobData.collectionId,
@@ -826,13 +677,6 @@ const processWatermarkJob = async (
   }
 };
 
-// ===========================
-// Worker Management
-// ===========================
-
-/**
- * Main worker function that polls Redis queue for jobs
- */
 const startWorker = async () => {
   const queueKey = "watermark-processing";
   const options = getBatchOptions();
@@ -846,19 +690,16 @@ const startWorker = async () => {
 
   let consecutiveErrors = 0;
   const maxConsecutiveErrors = 5;
-  const baseRetryDelay = 1000; // 1 second
+  const baseRetryDelay = 1000;
 
-  // Main worker loop
   while (true) {
     try {
-      // Block and wait for job from Redis queue (with 30s timeout)
       const result = await redis.brpop(queueKey, 30);
 
       if (result && result[1]) {
-        // Parse and process job
         const jobData: WatermarkJobData = JSON.parse(result[1]);
         logger.info(
-          `🔄 Processing job for collection: ${jobData.collectionId}`
+          `🔄 Processing JOB for collection: ${jobData.collectionId}`
         );
 
         const processingResult = await processWatermarkJob(jobData);
@@ -872,14 +713,13 @@ const startWorker = async () => {
               time: `${(processingResult.processingTime! / 1000).toFixed(2)}s`,
             }
           );
-          consecutiveErrors = 0; // Reset error counter on success
+          consecutiveErrors = 0;
         } else {
           logger.warn(
             `⚠️ Job skipped for collection: ${jobData.collectionId} - ${processingResult.reason}`
           );
         }
       } else {
-        // No job received within timeout - normal behavior
         logger.debug("No jobs in queue, continuing to poll...");
         consecutiveErrors = 0;
       }
@@ -890,7 +730,6 @@ const startWorker = async () => {
         error
       );
 
-      // Implement exponential backoff for consecutive errors
       if (consecutiveErrors >= maxConsecutiveErrors) {
         const retryDelay =
           baseRetryDelay *
@@ -906,19 +745,13 @@ const startWorker = async () => {
   }
 };
 
-/**
- * Handles graceful shutdown of the worker
- * @param signal - Signal that triggered shutdown
- */
 const gracefulShutdown = async (signal: string) => {
   logger.info(`Received ${signal}, shutting down worker gracefully...`);
 
   try {
-    // Log queue status before shutdown
     const queueLength = await redis.llen("watermark-processing");
     logger.info(`Queue length at shutdown: ${queueLength}`);
 
-    // Close Redis connection
     await redis.quit();
     logger.info("Redis connection closed");
   } catch (error) {
@@ -928,21 +761,14 @@ const gracefulShutdown = async (signal: string) => {
   process.exit(0);
 };
 
-// ===========================
-// Worker Initialization
-// ===========================
-
-// Start the worker
 startWorker().catch((err) => {
   logger.error("Worker failed to start:", err);
   process.exit(1);
 });
 
-// Register shutdown handlers
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
-// Handle unexpected errors
 process.on("uncaughtException", (error) => {
   logger.error("Uncaught Exception:", error);
   process.exit(1);
@@ -954,5 +780,3 @@ process.on("unhandledRejection", (reason, promise) => {
 });
 
 export default startWorker;
-
-// 1000 recordper batch
