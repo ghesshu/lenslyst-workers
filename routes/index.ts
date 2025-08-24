@@ -3,7 +3,8 @@ import { Router } from "express";
 import multer from "multer";
 import { processImageWithWatermark } from "../workers/watermark/watermark.proccessor";
 import logger from "../utils/logger";
-import { WatermarkConfig } from "../models/collection.model";
+import { WatermarkConfig } from "../types";
+
 
 const router = Router();
 

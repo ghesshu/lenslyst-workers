@@ -1,7 +1,5 @@
 import {
   Collection,
-  WatermarkConfig,
-  WatermarkProgress,
 } from "../../models/collection.model";
 import {
   GetObjectCommand,
@@ -15,6 +13,7 @@ import { redis } from "./queue";
 import { s3Client } from "./s3";
 import { File } from "../../models/file.model";
 import logger from "../../utils/logger";
+import { WatermarkConfig, WatermarkProgress } from "../../types";
 
 logger.info("🚀 Watermark worker started!");
 
