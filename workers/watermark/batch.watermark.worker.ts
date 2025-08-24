@@ -278,22 +278,19 @@ const updateWatermarkProgress = async (
 };
 
 const validateCollectionForProcessing = async (
-  collectionId: string
+  slug: string,
+  collectionId?: string
 ): Promise<boolean> => {
   try {
-    const collection = await Collection.findById(collectionId);
+    const collection = await Collection.findOne({ slug: slug });
 
     // Handle missing collection
     if (!collection) {
-      logger.warn(
-        `Collection ${collectionId} no longer exists, skipping processing`
-      );
+      logger.warn(`Collection ${slug} no longer exists, skipping processing`);
 
       try {
         await fetch(`${process.env.CANCEL_WATERMARK_URL}/${collectionId}`);
-        logger.warn(
-          `Collection ${collectionId} no longer exists, skipping processing`
-        );
+        logger.warn(`Collection ${slug} no longer exists, skipping processing`);
       } catch (cancelError) {
         logger.error(
           `Failed to cancel watermark for ${collectionId}:`,
@@ -309,14 +306,14 @@ const validateCollectionForProcessing = async (
     // Skip if status is not active
     if (["idle", "completed"].includes(status)) {
       logger.warn(
-        `Collection ${collectionId} status changed to ${status}, skipping processing`
+        `Collection ${slug} status changed to ${status}, skipping processing`
       );
       return false;
     }
 
     return true;
   } catch (error) {
-    logger.error(`Error validating collection ${collectionId}:`, error);
+    logger.error(`Error validating collection ${slug}:`, error);
     return false;
   }
 };
@@ -493,7 +490,7 @@ const processWatermarkJob = async (
 
     const { collectionId, watermarkConfig, slug } = jobData;
 
-    if (!(await validateCollectionForProcessing(collectionId))) {
+    if (!(await validateCollectionForProcessing(slug, collectionId))) {
       return {
         success: false,
         collectionId,
@@ -555,7 +552,7 @@ const processWatermarkJob = async (
         `Processing batch ${batchNumber}/${totalBatches} (${batch.length} images)`
       );
 
-      if (!(await validateCollectionForProcessing(collectionId))) {
+      if (!(await validateCollectionForProcessing(slug, collectionId))) {
         logger.warn(
           `Collection ${collectionId} no longer valid, stopping at batch ${batchNumber}`
         );
