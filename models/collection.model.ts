@@ -1,59 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
-
-export type WatermarkConfig = {
-  requirePayment?: boolean;
-  amount?: number;
-  type: "text" | "image";
-  text?: string;
-  imageKey?: string;
-  alignment:
-    | "northwest"
-    | "north"
-    | "northeast"
-    | "west"
-    | "center"
-    | "east"
-    | "southwest"
-    | "south"
-    | "southeast";
-  opacity: number;
-  size: number;
-  rotation: number;
-  tileType: "single" | "grid" | "diagonal";
-  textColor?: string;
-  previewMode: "watermarked" | "blurred" | "none";
-  CreatedAt: Date;
-  UpdatedAt: Date;
-};
-
-export type WatermarkProgress = {
-  total: number;
-  watermarked: number;
-  locked: boolean;
-  status: "idle" | "queued" | "processing" | "completed" | "failed";
-  queuedAt?: Date;
-  startedAt?: Date;
-  completedAt?: Date;
-  estimatedTimeRemaining?: number; // in seconds
-  currentImageName?: string;
-};
-
-// Enhanced progress response type for API responses
-export type WatermarkProgressResponse = {
-  collectionId: string;
-  collectionName: string;
-  status: "idle" | "queued" | "processing" | "completed" | "failed";
-  totalImages: number;
-  processedImages: number;
-  queuePosition?: number;
-  queuedAt?: Date;
-  startedAt?: Date;
-  completedAt?: Date;
-  estimatedTimeRemaining?: number;
-  currentImageName?: string;
-  progressPercentage: number;
-  elapsedTime?: number; // in seconds
-};
+import { Config, WatermarkConfig, WatermarkProgress } from "../types";
 
 interface ICollection extends Document {
   name: string;
@@ -67,6 +13,7 @@ interface ICollection extends Document {
   coverPhotoKey: string;
   template: string;
   createdAt: Date;
+  config: Config;
   watermarkConfig?: WatermarkConfig;
   watermarkProgress?: WatermarkProgress;
   setWatermarkConfig(config: WatermarkConfig): void;
@@ -100,13 +47,23 @@ const collectionSchema = new Schema<ICollection>({
     default: "classic",
   },
   createdAt: { type: Date, default: Date.now },
+  config: {
+    visibility: {
+      type: String,
+      enum: ["public", "private", "password"],
+      default: "public",
+    },
+    password: { type: String },
+    requirePayment: { type: Boolean, default: false },
+    amount: { type: Number, default: 0 },
+  },
   watermarkConfig: {
     requirePayment: { type: Boolean, default: false },
     amount: { type: Number, default: 0 },
     type: {
       type: String,
       enum: ["text", "image"],
-      required: true,
+      // required: true,
     },
     text: { type: String },
     imageKey: { type: String },

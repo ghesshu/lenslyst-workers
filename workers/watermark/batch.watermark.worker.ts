@@ -1,8 +1,4 @@
-import {
-  Collection,
-  WatermarkConfig,
-  WatermarkProgress,
-} from "../../models/collection.model";
+import { Collection } from "../../models/collection.model";
 import {
   GetObjectCommand,
   PutObjectCommand,
@@ -17,6 +13,7 @@ import { File } from "../../models/file.model";
 import logger from "../../utils/logger";
 import { cpus } from "os";
 import { createHash } from "crypto";
+import { WatermarkConfig, WatermarkProgress } from "../../types";
 
 interface WatermarkJobData {
   collectionId: string;
@@ -294,6 +291,9 @@ const validateCollectionForProcessing = async (
 
       try {
         await fetch(`${process.env.CANCEL_WATERMARK_URL}/${collectionId}`);
+        logger.warn(
+          `Collection ${collectionId} no longer exists, skipping processing`
+        );
       } catch (cancelError) {
         logger.error(
           `Failed to cancel watermark for ${collectionId}:`,
